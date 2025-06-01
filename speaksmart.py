@@ -1,13 +1,6 @@
 import logging
 import os
-# import threading # threading теперь используется внутри health_checker
-# from http.server import BaseHTTPRequestHandler, HTTPServer # Эти импорты больше не нужны здесь
-# from urllib.parse import urlparse # Этот импорт больше не нужен здесь
-
-# --- ИМПОРТЫ TELEGRAM ---
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-# ReplyKeyboardMarkup и KeyboardButton пока не используем активно, но импорт может остаться
-from telegram import ReplyKeyboardMarkup, KeyboardButton 
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -18,7 +11,6 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 
-# --- ИМПОРТЫ НАШИХ МОДУЛЕЙ ---
 import gemini_api 
 from health_checker import start_health_check_server_in_thread # Импортируем из модуля
 
@@ -36,6 +28,14 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # --- КОНСТАНТЫ ДЛЯ СОСТОЯНИЙ ДИАЛОГА ---
 GET_TEXT_FOR_CORRECTION, CHOOSE_STYLE, DESCRIBE_ADDRESSEE, POST_PROCESSING_MENU = range(4)
 
+# --- ОСНОВНАЯ КЛАВИАТУРА МЕНЮ ---
+main_menu_layout = [
+    [KeyboardButton("/start"), KeyboardButton("/cancel")]
+]
+# one_time_keyboard=False означает, что клавиатура будет постоянной, пока ее не сменит другая
+# resize_keyboard=True делает кнопки более компактными
+main_menu_keyboard = ReplyKeyboardMarkup(main_menu_layout, resize_keyboard=True, one_time_keyboard=False)
+
 # --- Функции бота ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_name = update.effective_user.first_name
@@ -50,9 +50,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🔹 После переформулирования, ты сможешь дополнительно скорректировать тон (например, сделать текст мягче или строже), сгенерировать вариант заново или начать работу с новым текстом.\n\n"
         "Готов начать?"
     )
-    keyboard = [[InlineKeyboardButton("Улучшить текст 📝", callback_data="start_correction")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+    # Инлайн-кнопка для начала основного диалога
+    inline_buttons_for_flow = [[InlineKeyboardButton("Улучшить текст 📝", callback_data="start_correction")]]
+    inline_markup_for_flow = InlineKeyboardMarkup(inline_buttons_for_flow)
+
+    # Отправляем приветственное сообщение с инлайн-кнопкой
+    await update.message.reply_text(
+        text=welcome_text,
+        reply_markup=inline_markup_for_flow 
+    )
+    
+    # Отправляем сообщение для установки ReplyKeyboardMarkup (основного меню)
+    # Это сообщение может быть и другим, например, просто "Главное меню:"
+    # Важно, что оно отправляется с main_menu_keyboard
+    await update.message.reply_text(
+        "Для быстрого доступа к основным командам используйте меню 👇 (оно может быть скрыто под значком 'Меню' рядом с полем ввода).",
+        reply_markup=main_menu_keyboard
+    )
 
 async def request_text_for_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
