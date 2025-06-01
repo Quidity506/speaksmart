@@ -251,12 +251,13 @@ async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ConversationHandler.END # Завершаем диалог после обработки
 
     elif style_choice == "style_auto":
-        # Этот блок мы реализуем в следующем подшаге
+        # Запрашиваем описание адресата
         await query.edit_message_text(
-            text="Ты выбрал 'Автоопределение стиля'. "
-                 "Этот функционал мы добавим следующим! Пока завершаю диалог."
+            text="Ты выбрал 'Автоопределение стиля'.\n\n"
+                "Чтобы я мог лучше подобрать стиль, пожалуйста, опиши кратко, кому адресовано это сообщение "
+                "(например: 'начальнику', 'близкому другу', 'клиенту', 'учителю', 'в официальную инстанцию')."
         )
-        return ConversationHandler.END # Пока завершаем
+        return DESCRIBE_ADDRESSEE # Переходим в состояние ожидания описания адресата
     
     else:
         # На случай, если callback_data какой-то непредвиденный
@@ -264,6 +265,57 @@ async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ConversationHandler.END
     
 # --- НОВАЯ ФУНКЦИЯ ДЛЯ ОТМЕНЫ ДИАЛОГА ---
+# --- НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ОПИСАНИЯ АДРЕСАТА ---
+async def addressee_described(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Вызывается после того, как пользователь описал адресата для автоопределения стиля.
+    Формирует промпт, вызывает Gemini API и отправляет результат.
+    """
+    addressee_description = update.message.text
+    chat_id = update.effective_chat.id
+    logger.info(f"Получено описание адресата от chat_id {chat_id}: '{addressee_description}'")
+    
+    context.user_data['addressee_description'] = addressee_description
+    text_to_correct = context.user_data.get('text_to_correct')
+
+    if not text_to_correct:
+        await update.message.reply_text(
+            "Произошла ошибка: не найден исходный текст. Пожалуйста, начни заново: /start"
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text("Понял тебя! Подбираю стиль и переформулирую текст для твоего адресата. Минуточку...")
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    # Формируем промпт для Gemini с учетом описания адресата
+    prompt_for_gemini = (
+        f"Переформулируй следующий текст, автоматически подобрав наиболее подходящий стиль "
+        f"для следующего адресата: '{addressee_description}'. "
+        f"Сохраняй первоначальный смысл текста. Исходный текст: \"{text_to_correct}\"\n\n"
+        "Предоставь только переформулированный текст без каких-либо дополнительных комментариев, "
+        "вступлений или объяснений."
+    )
+    
+    logger.info(f"Промпт для Gemini (автоопределение): {prompt_for_gemini}")
+
+    if not GEMINI_API_KEY:
+        logger.error("GEMINI_API_KEY не настроен для addressee_described.")
+        await update.message.reply_text("Ошибка конфигурации сервиса для автоопределения стиля. Ключ API не найден.")
+        return ConversationHandler.END
+        
+    try:
+        # Вызываем Gemini API (синхронно, как мы решили ранее)
+        response_text = gemini_api.ask_gemini(prompt_for_gemini, GEMINI_API_KEY)
+        
+        await update.message.reply_text(f"Вот переформулированный текст (стиль подобран автоматически для '{addressee_description}'):\n\n{response_text}")
+        logger.info(f"Ответ от Gemini (автоопределение для '{addressee_description}'): {response_text}")
+
+    except Exception as e:
+        logger.error(f"Ошибка при вызове gemini_api.ask_gemini для автоопределения: {e}", exc_info=True)
+        await update.message.reply_text("К сожалению, произошла ошибка при обработке вашего запроса с автоопределением стиля. Попробуйте позже.")
+        
+    return ConversationHandler.END # Завершаем диалог после обработки
+
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Отменяет текущий диалог и очищает user_data."""
     await update.message.reply_text(
@@ -309,13 +361,13 @@ def main() -> None:
             CallbackQueryHandler(request_text_for_correction, pattern='^start_correction$')
         ],
         states={
-            GET_TEXT_FOR_CORRECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_correction)],
-            CHOOSE_STYLE: [
-                # Мы ожидаем callback_data, начинающийся с "style_"
-                CallbackQueryHandler(style_chosen, pattern='^style_(business|academic|personal|simplified|auto)$')
-            ],
-            # ... Здесь в будущем будут DESCRIBE_ADDRESSEE, POST_PROCESSING_MENU и т.д. ...
-        },
+                GET_TEXT_FOR_CORRECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_correction)],
+                CHOOSE_STYLE: [
+                    CallbackQueryHandler(style_chosen, pattern='^style_(business|academic|personal|simplified|auto)$')
+                ],
+                DESCRIBE_ADDRESSEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, addressee_described)],
+                # ... Здесь в будущем будут POST_PROCESSING_MENU и т.д. ...
+            },
         fallbacks=[
             CommandHandler('cancel', cancel_conversation)
         ],
