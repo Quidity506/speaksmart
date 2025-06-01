@@ -91,7 +91,7 @@ async def received_text_for_correction(update: Update, context: ContextTypes.DEF
     )
     return CHOOSE_STYLE
 
-async def _send_post_processing_menu(update_or_query_or_message_object, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
+async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
     """Вспомогательная функция для отправки меню постобработки."""
     context.user_data['last_gemini_response'] = response_text 
 
@@ -110,47 +110,42 @@ async def _send_post_processing_menu(update_or_query_or_message_object, context:
     
     message_to_send = f"{message_prefix}\n\n{response_text}\n\nКак тебе результат? Можем доработать:"
     
-    # Определяем, редактировать сообщение или отправлять новое
-    # update_or_query_or_message_object может быть CallbackQuery, Update, или Message объектом
-    
-    target_message_for_edit = None
-    chat_id_for_send = None
+    try:
+        if isinstance(update_or_query, CallbackQuery):
+            # Если это CallbackQuery, мы хотим отредактировать сообщение, к которому была привязана кнопка
+            if update_or_query.message:
+                await context.bot.edit_message_text(
+                    text=message_to_send,
+                    chat_id=update_or_query.message.chat_id,
+                    message_id=update_or_query.message.message_id,
+                    reply_markup=reply_markup_inline
+                )
+            else: # На случай если query.message почему-то None (маловероятно для CallbackQuery от Inline кнопок)
+                logger.error("CallbackQuery не содержит message объекта для редактирования.")
+                await context.bot.send_message(chat_id=update_or_query.from_user.id, text=message_to_send, reply_markup=reply_markup_inline)
+        
+        elif isinstance(update_or_query, Update) and update_or_query.message:
+            # Если это Update от MessageHandler (как из addressee_described), мы должны отправить новое сообщение
+            await update_or_query.message.reply_text(text=message_to_send, reply_markup=reply_markup_inline)
+        
+        else:
+            # Крайний случай: если передан неизвестный тип или update без effective_chat
+            logger.error(f"Неожиданный тип объекта или отсутствует чат в _send_post_processing_menu: {type(update_or_query)}")
+            if context.update and context.update.effective_chat: # Попытка отправить в текущий чат из контекста
+                 await context.bot.send_message(chat_id=context.update.effective_chat.id, text="Произошла ошибка отображения результата.")
+            # Если и это не удалось, то ничего не отправляем, но ошибка залогирована.
 
-    if isinstance(update_or_query_or_message_object, CallbackQuery):
-        # Если это CallbackQuery, мы хотим отредактировать сообщение, к которому была привязана кнопка
-        target_message_for_edit = update_or_query_or_message_object.message
-        chat_id_for_send = update_or_query_or_message_object.effective_chat.id # на всякий случай
-    elif isinstance(update_or_query_or_message_object, Update) and update_or_query_or_message_object.message:
-        # Если это Update от MessageHandler (как из addressee_described), мы должны отправить новое сообщение
-        chat_id_for_send = update_or_query_or_message_object.effective_chat.id
-    # Можно добавить еще elif isinstance(update_or_query_or_message_object, Message), если будем передавать Message напрямую
-    else:
-        logger.error(f"Неожиданный тип объекта в _send_post_processing_menu: {type(update_or_query_or_message_object)}")
-        # Отправляем в чат, откуда пришел последний update, если он есть
-        if context.update and context.update.effective_chat:
-             await context.bot.send_message(chat_id=context.update.effective_chat.id, text="Произошла ошибка отображения результата.")
-        return # Не можем продолжить
-
-    if target_message_for_edit:
-        try:
-            await context.bot.edit_message_text(
-                text=message_to_send,
-                chat_id=target_message_for_edit.chat_id,
-                message_id=target_message_for_edit.message_id,
-                reply_markup=reply_markup_inline
-            )
-        except Exception as e:
-            logger.error(f"Ошибка при редактировании сообщения в _send_post_processing_menu: {e}. Отправляю новым сообщением.")
-            # Если редактирование не удалось, отправляем новым сообщением
-            if chat_id_for_send: # chat_id_for_send должен быть установлен, если target_message_for_edit был
-                 await context.bot.send_message(chat_id=chat_id_for_send, text=message_to_send, reply_markup=reply_markup_inline)
-            else: # Крайний случай
-                 await context.bot.send_message(chat_id=context.update.effective_chat.id, text=message_to_send, reply_markup=reply_markup_inline)
-
-    elif chat_id_for_send:
-        await context.bot.send_message(chat_id=chat_id_for_send, text=message_to_send, reply_markup=reply_markup_inline)
-    else: # Если это Update от MessageHandler (например, после описания адресата)
-        await update_or_query.message.reply_text(text=message_to_send, reply_markup=reply_markup_inline)
+    except Exception as e:
+        logger.error(f"Ошибка при отправке/редактировании сообщения в _send_post_processing_menu: {e}", exc_info=True)
+        # Попытка уведомить пользователя об ошибке, если это возможно
+        chat_id_to_notify = None
+        if isinstance(update_or_query, CallbackQuery):
+            chat_id_to_notify = update_or_query.from_user.id
+        elif isinstance(update_or_query, Update) and update_or_query.effective_chat:
+            chat_id_to_notify = update_or_query.effective_chat.id
+        
+        if chat_id_to_notify:
+            await context.bot.send_message(chat_id=chat_id_to_notify, text="Произошла ошибка при отображении меню доработки.")
 
 async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
