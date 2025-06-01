@@ -222,9 +222,15 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
     logger.info(f"Пользователь {query.from_user.id} выбрал действие: {action_choice}")
 
     if action_choice == "start_new_text":
-        await query.edit_message_text(text="Хорошо, этот диалог завершен. Чтобы начать новый, отправь /start.")
-        context.user_data.clear()
-        return ConversationHandler.END
+            context.user_data.clear() # Очищаем данные предыдущего диалога, это важно
+            
+            # Редактируем текущее сообщение, чтобы запросить новый текст
+            # Это тот же текст, что используется в request_text_for_correction
+            await query.edit_message_text(
+                text="Отлично! Теперь, пожалуйста, отправь мне текст, который нужно переформулировать."
+            )
+            # Возвращаем состояние, в котором бот ожидает текст от пользователя
+            return GET_TEXT_FOR_CORRECTION
 
     last_response = context.user_data.get('last_gemini_response')
     original_text = context.user_data.get('text_to_correct')
