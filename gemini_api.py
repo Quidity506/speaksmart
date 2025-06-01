@@ -44,16 +44,30 @@ def ask_gemini(prompt: str, api_key: str) -> str:
     }
     
     try:
-        # Выполняем POST-запрос к API
-        # Используем get_api_headers() вместо get_masked_headers()
-        response = requests.post(url, headers=get_api_headers(), json=payload, timeout=30) # Добавлен таймаут
-        
-        # Проверяем статус ответа
-        response.raise_for_status() # Вызовет исключение для кодов ошибок 4xx/5xx
+        response = requests.post(url, headers=get_api_headers(), json=payload, timeout=30)
+        response.raise_for_status()
         
         result = response.json()
-        
-        # Извлекаем сгенерированный текст
+        # ВАЖНО: Логируем полный ответ для отладки, особенно при неожиданном поведении
+        logging.info("Полный ответ от Gemini API: %s", result)
+
+        # --- НАЧАЛО ИЗМЕНЕНИЙ ---
+        # Сначала проверяем, не был ли запрос заблокирован
+        if 'promptFeedback' in result and 'blockReason' in result['promptFeedback']:
+            block_reason = result['promptFeedback']['blockReason']
+            block_reason_message = result['promptFeedback'].get('blockReasonMessage', 'Причина не указана.') # Если есть более подробное сообщение
+            
+            logging.warning(
+                f"Запрос заблокирован Gemini API. Причина: {block_reason}. Сообщение: {block_reason_message}. Полный ответ: {result}"
+            )
+            if block_reason == 'PROHIBITED_CONTENT' or block_reason == 'SAFETY': # 'SAFETY' это более общий термин для блокировки по безопасности
+                return ("К сожалению, ваш запрос не может быть обработан из-за потенциально провокационного или "
+                        "недопустимого содержания. Пожалуйста, попробуйте изменить текст или описание адресата.")
+            else:
+                # Для других причин блокировки (если они будут)
+                return (f"Ваш запрос не может быть обработан (причина блокировки: {block_reason}). "
+                        "Пожалуйста, попробуйте изменить текст.")
+
         if 'candidates' in result and len(result['candidates']) > 0:
             candidate = result['candidates'][0]
             if 'content' in candidate and 'parts' in candidate['content'] and len(candidate['content']['parts']) > 0:
