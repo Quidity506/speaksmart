@@ -220,28 +220,102 @@ async def addressee_described(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("К сожалению, произошла ошибка при обработке вашего запроса с автоопределением стиля. Попробуйте позже.")
         return ConversationHandler.END
 
-# --- НОВАЯ ФУНКЦИЯ-ОБРАБОТЧИК ДЛЯ ПОСТОБРАБОТКИ (ПОКА ЗАГЛУШКА) ---
+#
+# --- ОБНОВЛЕННАЯ ФУНКЦИЯ-ОБРАБОТЧИК ДЛЯ ПОСТОБРАБОТКИ ---
 async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Вызывается после того, как пользователь нажал на одну из кнопок постобработки.
-    Пока что просто сообщает о выборе и завершает диалог.
+    Вызывается после того, как пользователь нажал на одну из кнопок постобработки
+    ("Мягче", "Жестче", "Формальнее").
+    Применяет выбранную модификацию к последнему тексту и снова предлагает меню.
     """
     query = update.callback_query
     await query.answer()
     
     action_choice = query.data # например, 'adjust_softer'
-    # Мы не сохраняем 'post_process_action' в user_data, так как это одноразовое действие
     
-    last_response = context.user_data.get('last_gemini_response', "К сожалению, предыдущий текст не найден.")
-    
-    logger.info(f"Пользователь {query.from_user.id} выбрал действие постобработки: {action_choice} для текста: \"{last_response[:30]}...\"")
-    
-    await query.edit_message_text(
-        text=f"Ты выбрал действие: {action_choice} для текста: \"{last_response[:50]}...\".\n"
-             "Эта функция пока не реализована. Завершаю диалог для теста."
-    )
-    return ConversationHandler.END # Пока что завершаем диалог
+    last_response = context.user_data.get('last_gemini_response')
 
+    if not last_response:
+        logger.warning(f"В post_processing_action не найден last_gemini_response для пользователя {query.from_user.id}")
+        await query.edit_message_text(
+            text="Произошла ошибка: не найден текст для дальнейшей доработки. Пожалуйста, начни заново: /start"
+        )
+        return ConversationHandler.END
+
+    logger.info(f"Пользователь {query.from_user.id} выбрал действие постобработки: {action_choice} для текста: \"{last_response[:30]}...\"")
+
+    new_prompt_instruction_verb = "" # Глагол для сообщения пользователю
+    prompt_modification_instruction = "" # Инструкция для Gemini
+
+    if action_choice == "adjust_softer":
+        new_prompt_instruction_verb = "смягчение тона"
+        prompt_modification_instruction = "Сделай следующий текст немного мягче по тону, сохранив его основной смысл:"
+    elif action_choice == "adjust_harder":
+        new_prompt_instruction_verb = "увеличение жесткости/настойчивости тона"
+        prompt_modification_instruction = "Сделай следующий текст немного жестче или более настойчивым по тону, сохранив его основной смысл:"
+    elif action_choice == "adjust_more_formal":
+        new_prompt_instruction_verb = "увеличение формальности стиля"
+        prompt_modification_instruction = "Сделай следующий текст еще более формальным, сохранив его основной смысл:"
+    else:
+        # Этого не должно произойти, так как pattern в CallbackQueryHandler отфильтрует
+        logger.warning(f"Неизвестное действие в post_processing_action: {action_choice}")
+        await query.edit_message_text(text=f"Неизвестное действие: {action_choice}. Завершаю диалог.")
+        return ConversationHandler.END
+
+    # Сообщаем пользователю, что начали обработку
+    await query.edit_message_text(text=f"Применяю '{new_prompt_instruction_verb}'... Минуточку.")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    prompt_for_gemini = (
+        f"{prompt_modification_instruction}\n\n"
+        f"Вот текст для модификации: \"{last_response}\"\n\n"
+        "Предоставь только измененный текст без каких-либо дополнительных комментариев, "
+        "вступлений или объяснений."
+    )
+    logger.info(f"Промпт для Gemini (постобработка - {action_choice}): {prompt_for_gemini}")
+
+    if not GEMINI_API_KEY:
+        logger.error(f"GEMINI_API_KEY не настроен для post_processing_action ({action_choice}).")
+        await context.bot.edit_message_text( # Редактируем "Минуточку..."
+            text="Ошибка конфигурации сервиса. Ключ API не найден.",
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id
+        )
+        return ConversationHandler.END
+    
+    try:
+        new_response_text = gemini_api.ask_gemini(prompt_for_gemini, GEMINI_API_KEY)
+        context.user_data['last_gemini_response'] = new_response_text # Обновляем сохраненный текст
+
+        # Снова показываем те же кнопки постобработки
+        post_process_keyboard_inline = [[
+            InlineKeyboardButton("Мягче", callback_data="adjust_softer"),
+            InlineKeyboardButton("Жестче", callback_data="adjust_harder"),
+            InlineKeyboardButton("Формальнее", callback_data="adjust_more_formal"),
+        ]]
+        reply_markup_inline = InlineKeyboardMarkup(post_process_keyboard_inline)
+
+        final_message_text = f"Текст после '{new_prompt_instruction_verb}':\n\n{new_response_text}\n\nЧто еще изменим?"
+
+        await context.bot.edit_message_text( # Редактируем "Минуточку..."
+            text=final_message_text,
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            reply_markup=reply_markup_inline
+        )
+        logger.info(f"Текст доработан ({action_choice}). Новый текст: {new_response_text[:50]}...")
+        return POST_PROCESSING_MENU # Остаемся в меню постобработки
+
+    except Exception as e:
+        logger.error(f"Ошибка при вызове gemini_api.ask_gemini в post_processing_action ({action_choice}): {e}", exc_info=True)
+        error_message_text = "К сожалению, произошла ошибка при доработке текста. Попробуйте позже."
+        await context.bot.edit_message_text( # Редактируем "Минуточку..."
+            text=error_message_text,
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id
+        )
+        return ConversationHandler.END # Завершаем при ошибке
+    
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Действие отменено. Если захочешь начать заново, просто нажми /start.")
     context.user_data.clear()
