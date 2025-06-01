@@ -7,7 +7,7 @@ import os
 # --- ИМПОРТЫ TELEGRAM ---
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 # ReplyKeyboardMarkup и KeyboardButton пока не используем активно, но импорт может остаться
-from telegram import ReplyKeyboardMarkup, KeyboardButton 
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery 
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -91,7 +91,7 @@ async def received_text_for_correction(update: Update, context: ContextTypes.DEF
     )
     return CHOOSE_STYLE
 
-async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
+async def _send_post_processing_menu(update_or_query_or_message_object, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
     """Вспомогательная функция для отправки меню постобработки."""
     context.user_data['last_gemini_response'] = response_text 
 
@@ -111,13 +111,44 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
     message_to_send = f"{message_prefix}\n\n{response_text}\n\nКак тебе результат? Можем доработать:"
     
     # Определяем, редактировать сообщение или отправлять новое
-    if hasattr(update_or_query, 'message') and update_or_query.message: # Если это CallbackQuery
-        await context.bot.edit_message_text(
-            text=message_to_send,
-            chat_id=update_or_query.message.chat_id,
-            message_id=update_or_query.message.message_id,
-            reply_markup=reply_markup_inline
-        )
+    # update_or_query_or_message_object может быть CallbackQuery, Update, или Message объектом
+    
+    target_message_for_edit = None
+    chat_id_for_send = None
+
+    if isinstance(update_or_query_or_message_object, CallbackQuery):
+        # Если это CallbackQuery, мы хотим отредактировать сообщение, к которому была привязана кнопка
+        target_message_for_edit = update_or_query_or_message_object.message
+        chat_id_for_send = update_or_query_or_message_object.effective_chat.id # на всякий случай
+    elif isinstance(update_or_query_or_message_object, Update) and update_or_query_or_message_object.message:
+        # Если это Update от MessageHandler (как из addressee_described), мы должны отправить новое сообщение
+        chat_id_for_send = update_or_query_or_message_object.effective_chat.id
+    # Можно добавить еще elif isinstance(update_or_query_or_message_object, Message), если будем передавать Message напрямую
+    else:
+        logger.error(f"Неожиданный тип объекта в _send_post_processing_menu: {type(update_or_query_or_message_object)}")
+        # Отправляем в чат, откуда пришел последний update, если он есть
+        if context.update and context.update.effective_chat:
+             await context.bot.send_message(chat_id=context.update.effective_chat.id, text="Произошла ошибка отображения результата.")
+        return # Не можем продолжить
+
+    if target_message_for_edit:
+        try:
+            await context.bot.edit_message_text(
+                text=message_to_send,
+                chat_id=target_message_for_edit.chat_id,
+                message_id=target_message_for_edit.message_id,
+                reply_markup=reply_markup_inline
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при редактировании сообщения в _send_post_processing_menu: {e}. Отправляю новым сообщением.")
+            # Если редактирование не удалось, отправляем новым сообщением
+            if chat_id_for_send: # chat_id_for_send должен быть установлен, если target_message_for_edit был
+                 await context.bot.send_message(chat_id=chat_id_for_send, text=message_to_send, reply_markup=reply_markup_inline)
+            else: # Крайний случай
+                 await context.bot.send_message(chat_id=context.update.effective_chat.id, text=message_to_send, reply_markup=reply_markup_inline)
+
+    elif chat_id_for_send:
+        await context.bot.send_message(chat_id=chat_id_for_send, text=message_to_send, reply_markup=reply_markup_inline)
     else: # Если это Update от MessageHandler (например, после описания адресата)
         await update_or_query.message.reply_text(text=message_to_send, reply_markup=reply_markup_inline)
 
