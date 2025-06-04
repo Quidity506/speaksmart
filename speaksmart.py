@@ -549,7 +549,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
     logger.info(f"Промпт для Gemini ({action_choice}): {prompt_for_gemini[:500]}...")
-    await context.bot.send_chat_action(chat_id=query.effective_chat.id, action="typing")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     if not GEMINI_API_KEY:
         logger.error(f"GEMINI_API_KEY не настроен для post_processing_action ({action_choice}).")
