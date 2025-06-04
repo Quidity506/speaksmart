@@ -1,6 +1,13 @@
 import logging
 import os
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from telegram import ( 
+     Update,
+     InlineKeyboardMarkup,
+     InlineKeyboardButton,
+     CallbackQuery,
+     ReplyKeyboardMarkup,
+     KeyboardButton
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -10,7 +17,7 @@ from telegram.ext import (
     ConversationHandler,
     CallbackQueryHandler
 )
-
+from telegram.constants import ParseMode
 import gemini_api 
 from health_checker import start_health_check_server_in_thread # Импортируем из модуля
 
@@ -106,6 +113,10 @@ async def received_text_for_correction(update: Update, context: ContextTypes.DEF
 
 async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
     context.user_data['last_gemini_response'] = response_text 
+    
+    # Форматируем response_text в моноширинный блок MarkdownV2
+    formatted_response_text = f"```\n{response_text}\n```"
+
     post_process_keyboard_inline = [
         [
             InlineKeyboardButton("Мягче", callback_data="adjust_softer"),
@@ -118,33 +129,55 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
         ]
     ]
     reply_markup_inline = InlineKeyboardMarkup(post_process_keyboard_inline)
-    message_to_send = f"{message_prefix}\n\n{response_text}\n\nКак тебе результат? Можем доработать:"
+    
+    # Собираем итоговое сообщение с отформатированным текстом
+    message_to_send = f"{message_prefix}\n\n{formatted_response_text}\n\nКак тебе результат? Можем доработать:"
     
     try:
         if isinstance(update_or_query, CallbackQuery):
             if update_or_query.message:
+                # Редактируем существующее сообщение
                 await context.bot.edit_message_text(
                     text=message_to_send,
                     chat_id=update_or_query.message.chat_id,
                     message_id=update_or_query.message.message_id,
-                    reply_markup=reply_markup_inline
+                    reply_markup=reply_markup_inline,
+                    parse_mode=ParseMode.MARKDOWN_V2 # <--- ДОБАВЛЕНО
                 )
-            else:
-                logger.error("CallbackQuery не содержит message объекта для редактирования.")
-                await context.bot.send_message(chat_id=update_or_query.from_user.id, text=message_to_send, reply_markup=reply_markup_inline)
+            else: 
+                # Редкий случай: CallbackQuery без message, отправляем новое
+                logger.error("CallbackQuery не содержит message объекта для редактирования. Отправка нового сообщения.")
+                await context.bot.send_message(
+                    chat_id=update_or_query.from_user.id, 
+                    text=message_to_send,
+                    reply_markup=reply_markup_inline,
+                    parse_mode=ParseMode.MARKDOWN_V2 # <--- ДОБАВЛЕНО
+                )
+        
         elif isinstance(update_or_query, Update) and update_or_query.message:
-            await update_or_query.message.reply_text(text=message_to_send, reply_markup=reply_markup_inline)
+            # Отправляем новое сообщение в ответ на обычное сообщение (например, после ввода адресата)
+            await update_or_query.message.reply_text(
+                text=message_to_send, 
+                reply_markup=reply_markup_inline,
+                parse_mode=ParseMode.MARKDOWN_V2 # <--- ДОБАВЛЕНО
+            )
+        
         else:
-            logger.error(f"Неожиданный тип объекта или отсутствует чат в _send_post_processing_menu: {type(update_or_query)}")
+            # Логируем непредвиденный случай
+            logger.error(f"Неожиданный тип объекта ({type(update_or_query)}) или отсутствует чат в _send_post_processing_menu.")
             if context.update and context.update.effective_chat:
                  await context.bot.send_message(chat_id=context.update.effective_chat.id, text="Произошла ошибка отображения результата.")
+
     except Exception as e:
         logger.error(f"Ошибка при отправке/редактировании сообщения в _send_post_processing_menu: {e}", exc_info=True)
         chat_id_to_notify = None
-        if isinstance(update_or_query, CallbackQuery): chat_id_to_notify = update_or_query.from_user.id
-        elif isinstance(update_or_query, Update) and update_or_query.effective_chat: chat_id_to_notify = update_or_query.effective_chat.id
-        if chat_id_to_notify: await context.bot.send_message(chat_id=chat_id_to_notify, text="Произошла ошибка при отображении меню доработки.")
-
+        if isinstance(update_or_query, CallbackQuery):
+            chat_id_to_notify = update_or_query.from_user.id
+        elif isinstance(update_or_query, Update) and update_or_query.effective_chat:
+            chat_id_to_notify = update_or_query.effective_chat.id
+        
+        if chat_id_to_notify:
+            await context.bot.send_message(chat_id=chat_id_to_notify, text="Произошла ошибка при отображении меню доработки.")
 async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
