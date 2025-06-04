@@ -1,12 +1,12 @@
 import logging
 import os
-from telegram import ( 
-     Update,
-     InlineKeyboardMarkup,
-     InlineKeyboardButton,
-     CallbackQuery,
-     ReplyKeyboardMarkup,
-     KeyboardButton
+from telegram import (
+    Update,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+    ReplyKeyboardMarkup,
+    KeyboardButton
 )
 from telegram.ext import (
     Application,
@@ -18,6 +18,8 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
+
 import gemini_api 
 from health_checker import start_health_check_server_in_thread # Импортируем из модуля
 
@@ -114,8 +116,8 @@ async def received_text_for_correction(update: Update, context: ContextTypes.DEF
 async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
     context.user_data['last_gemini_response'] = response_text 
     
-    # Форматируем response_text в моноширинный блок MarkdownV2
-    formatted_response_text = f"```\n{response_text}\n```"
+    escaped_response_text = escape_markdown(response_text.strip(), version=2) # Убираем лишние пробелы/переносы от Gemini
+    formatted_response_text = f"```\n{escaped_response_text}\n```" 
 
     post_process_keyboard_inline = [
         [
