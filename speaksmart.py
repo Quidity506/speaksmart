@@ -353,7 +353,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
     if action_choice == "start_new_text":
         context.user_data.clear()
         await context.bot.send_message(
-            chat_id=query.effective_chat.id,
+            chat_id=update.effective_chat.id,
             text="Отлично! Теперь, пожалуйста, отправь мне текст, который нужно переформулировать."
         )
         try:
