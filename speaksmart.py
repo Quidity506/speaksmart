@@ -538,7 +538,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
                 "style_personal": "Личное общение", "style_simplified": "Упрощённый текст"
             }
             readable_style_name = style_name_map.get(chosen_style_callback, chosen_style_callback)
-            final_message_prefix = f"Новый вариант (стиль {readable_style_name}):"
+            final_message_prefix = f"Новый вариант ({readable_style_name}):"
         else:
             logger.error("Не удалось восстановить первоначальные параметры для regenerate_text (отсутствует chosen_style_callback или addressee_description для auto).")
             await query.edit_message_text(text="Ошибка: не удалось восстановить параметры для повторной генерации. Начните заново: /start")
