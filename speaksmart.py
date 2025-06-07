@@ -76,8 +76,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text=welcome_text,
         reply_markup=inline_markup_for_flow
     )
-    # Показываем основное меню с кнопками /start и /cancel
-    await update.message.reply_text("Главное меню:", reply_markup=main_menu_keyboard)
 
 async def request_text_for_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -117,20 +115,21 @@ async def received_text_for_correction(update: Update, context: ContextTypes.DEF
 
 async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
     """Вспомогательная функция для отправки меню постобработки с детальным логированием."""
-    context.user_data['last_gemini_response'] = response_text 
+    context.user_data['last_gemini_response'] = response_text
 
     logger.info(f"--- _send_post_processing_menu ---")
     logger.info(f"ОРИГИНАЛЬНЫЙ message_prefix: [{message_prefix}]")
     logger.info(f"ОРИГИНАЛЬНЫЙ response_text от Gemini: [{response_text}]")
-    
-    processed_response_text = response_text.strip()
-    logger.info(f"response_text ПОСЛЕ strip(): [{processed_response_text}]")
-    
+
+    # Убираем пробелы по краям и заменяем переносы строк на пробелы для inline monospaced text.
+    processed_response_text = response_text.strip().replace('\n', ' ')
+    logger.info(f"response_text ПОСЛЕ strip() и replace(): [{processed_response_text}]")
+
     escaped_response_text = escape_markdown(processed_response_text, version=2)
     logger.info(f"response_text ПОСЛЕ escape_markdown(): [{escaped_response_text}]")
-    
-    # Убираем \n перед последними ```, чтобы не было лишней пустой строки ВНУТРИ блока.
-    formatted_response_text = f"```\n{escaped_response_text}```" 
+
+    # Оборачиваем в одинарные обратные кавычки для inline monospaced text.
+    formatted_response_text = f"`{escaped_response_text}`"
     logger.info(f"formatted_response_text: [{formatted_response_text}]")
 
     escaped_message_prefix = escape_markdown(message_prefix, version=2)
@@ -148,17 +147,16 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
         ]
     ]
     reply_markup_inline = InlineKeyboardMarkup(post_process_keyboard_inline)
-    
+
     message_to_send = f"{escaped_message_prefix}\n\n{formatted_response_text}\n\nКак тебе результат? Можем доработать:"
     logger.info(f"ИТОГОВОЕ message_to_send (первые 300 симв): [{message_to_send[:300]}]")
-    
+
     try:
         target_message_for_edit = None
         chat_id_for_send = None
 
         if isinstance(update_or_query, CallbackQuery):
             target_message_for_edit = update_or_query.message
-            # chat_id_for_send = update_or_query.effective_chat.id # Не используется если target_message_for_edit есть
         elif isinstance(update_or_query, Update) and update_or_query.message:
             chat_id_for_send = update_or_query.effective_chat.id
         else:
@@ -179,9 +177,9 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
         elif chat_id_for_send:
             logger.info(f"Попытка отправить новое сообщение в чат ID: {chat_id_for_send}")
             await context.bot.send_message(
-                chat_id=chat_id_for_send, 
-                text=message_to_send, 
-                reply_markup=reply_markup_inline, 
+                chat_id=chat_id_for_send,
+                text=message_to_send,
+                reply_markup=reply_markup_inline,
                 parse_mode=ParseMode.MARKDOWN_V2
             )
         else:
@@ -189,10 +187,9 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
              if context.update and context.update.effective_chat: # Последняя попытка уведомить
                 await context.bot.send_message(chat_id=context.update.effective_chat.id, text="Критическая ошибка отображения результата.")
 
-
-    except telegram.error.BadRequest as e: # Ловим конкретно BadRequest
+    except telegram.error.BadRequest as e:
         logger.error(f"!!! BadRequest при отправке/редактировании сообщения в _send_post_processing_menu: {e}", exc_info=True)
-        logger.error(f"Проблемный message_to_send (первые 500 симв): [{message_to_send[:500]}]") # Логируем проблемное сообщение
+        logger.error(f"Проблемный message_to_send (первые 500 симв): [{message_to_send[:500]}]")
         chat_id_to_notify = None
         if isinstance(update_or_query, CallbackQuery): chat_id_to_notify = update_or_query.from_user.id
         elif isinstance(update_or_query, Update) and update_or_query.effective_chat: chat_id_to_notify = update_or_query.effective_chat.id
