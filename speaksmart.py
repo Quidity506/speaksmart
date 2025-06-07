@@ -15,7 +15,8 @@ from telegram.ext import (
     filters,
     ContextTypes,
     ConversationHandler,
-    CallbackQueryHandler
+    CallbackQueryHandler,
+    PicklePersistence
 )
 from telegram.constants import ParseMode
 from telegram.helpers import escape_markdown
@@ -46,36 +47,37 @@ main_menu_layout = [
 main_menu_keyboard = ReplyKeyboardMarkup(main_menu_layout, resize_keyboard=True, one_time_keyboard=False)
 
 # --- Функции бота ---
+# speaksmart.py
+
+# Новая версия функции start
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_name = update.effective_user.first_name
-    welcome_text = (
-        f"Привет, {user_name}!\n\n"
-        "Я SpeakSmartBot — твой помощник для улучшения текстов. "
-        "Я могу помочь тебе переформулировать сообщения, чтобы они звучали более профессионально, вежливо или соответствовали определенному стилю.\n\n"
-        "Что я умею:\n"
-        "🔹 Принимать твой текст для обработки.\n"
-        "🔹 Предлагать выбор стиля (например, деловой, неформальный, упрощенный).\n"
-        "🔹 Автоматически определять подходящий стиль, если ты опишешь адресата.\n"
-        "🔹 После переформулирования, ты сможешь дополнительно скорректировать тон (например, сделать текст мягче или строже), сгенерировать вариант заново или начать работу с новым текстом.\n\n"
-        "Готов начать?"
-    )
-    # Инлайн-кнопка для начала основного диалога
     inline_buttons_for_flow = [[InlineKeyboardButton("Улучшить текст 📝", callback_data="start_correction")]]
     inline_markup_for_flow = InlineKeyboardMarkup(inline_buttons_for_flow)
 
-    # Отправляем приветственное сообщение с инлайн-кнопкой
+    # Проверяем, есть ли у пользователя уже какие-то данные с прошлой сессии
+    if context.user_data:
+        # Если данные есть, значит, пользователь вернулся. Приветствуем кратко.
+        welcome_text = (
+            f"С возвращением, {user_name}!\n\n"
+            "Если хочешь продолжить прошлый диалог, просто используй кнопки из последнего сообщения. "
+            "Чтобы начать работу с новым текстом, нажми кнопку ниже или используй /cancel для полной отмены."
+        )
+    else:
+        # Если данных нет - это первый запуск. Показываем полное описание.
+        welcome_text = (
+            f"Привет, {user_name}! Я SpeakSmartBot.\n"
+            "Помогу сделать твой текст лучше. Нажми кнопку, чтобы начать 👇\n\n"
+            "(Подсказка: команды /start и /cancel всегда доступны в меню снизу)"
+        )
+
     await update.message.reply_text(
         text=welcome_text,
-        reply_markup=inline_markup_for_flow 
+        reply_markup=inline_markup_for_flow
     )
-    
-    # Отправляем сообщение для установки ReplyKeyboardMarkup (основного меню)
-    # Это сообщение может быть и другим, например, просто "Главное меню:"
-    # Важно, что оно отправляется с main_menu_keyboard
-    await update.message.reply_text(
-        "Для быстрого доступа к основным командам используйте меню 👇 (оно может быть скрыто под значком 'Меню' рядом с полем ввода).",
-        reply_markup=main_menu_keyboard
-    )
+    # Показываем основное меню с кнопками /start и /cancel
+    await update.message.reply_text("Главное меню:", reply_markup=main_menu_keyboard)
 
 async def request_text_for_correction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -591,7 +593,9 @@ def main() -> None:
     logger.info("Запуск основного приложения бота...")
     start_health_check_server_in_thread()
     
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    persistence = PicklePersistence(filepath="bot_persistence")
+    
+    application = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
     
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(request_text_for_correction, pattern='^start_correction$')],
@@ -609,6 +613,7 @@ def main() -> None:
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler('cancel', cancel_conversation))
     
     logger.info("Бот Telegram успешно настроен и запускается в режиме опроса...")
     try:
