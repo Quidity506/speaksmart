@@ -109,13 +109,22 @@ async def received_text_for_correction(update: Update, context: ContextTypes.DEF
     return CHOOSE_STYLE
 
 
+# --- ИЗМЕНЕНИЕ: Возвращаем моноширный шрифт с поддержкой многострочности ---
 async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
     context.user_data['last_gemini_response'] = response_text
 
-    processed_response_text = response_text.strip()
-    escaped_response_text = escape_markdown(processed_response_text, version=2)
-    formatted_response_text = escaped_response_text
     escaped_message_prefix = escape_markdown(message_prefix, version=2)
+    
+    # Готовим текст для блока кода.
+    # Внутри блока ```...``` не нужно экранировать большинство символов.
+    # Единственное, что может сломать парсинг - это последовательность ``` внутри самого текста.
+    # Заменяем ее на безопасный аналог на всякий случай.
+    code_block_text = response_text.strip().replace('```', '``ˋ')
+    if not code_block_text:
+        code_block_text = " " # Блок кода не может быть пустым
+
+    # Оборачиваем в тройные кавычки для многострочного моноширного блока
+    formatted_response_text = f"```{code_block_text}```"
 
     post_process_keyboard_inline = [
         [
@@ -129,6 +138,8 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
     ]
     reply_markup_inline = InlineKeyboardMarkup(post_process_keyboard_inline)
 
+    # Собираем итоговое сообщение. ВАЖНО: formatted_response_text уже содержит ```,
+    # поэтому его не нужно дополнительно экранировать.
     message_to_send = f"{escaped_message_prefix}\n\n{formatted_response_text}\n\nКак тебе результат? Можем доработать:"
 
     try:
@@ -153,9 +164,27 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
             )
     except Exception as e:
         logger.error(f"Ошибка при отправке/редактировании сообщения в _send_post_processing_menu: {e}", exc_info=True)
-        chat_id_to_notify = update_or_query.effective_chat.id
-        if chat_id_to_notify:
-            await context.bot.send_message(chat_id=chat_id_to_notify, text="Произошла ошибка при отображении меню доработки.")
+        # Fallback на случай ошибки парсинга Markdown
+        try:
+            fallback_text = f"{message_prefix}\n\n{response_text.strip()}\n\nКак тебе результат? Можем доработать:"
+            if isinstance(update_or_query, CallbackQuery) and update_or_query.message:
+                 await context.bot.edit_message_text(
+                    text=fallback_text,
+                    chat_id=update_or_query.message.chat_id,
+                    message_id=update_or_query.message.message_id,
+                    reply_markup=reply_markup_inline
+                )
+            else:
+                 await context.bot.send_message(
+                    chat_id=update_or_query.effective_chat.id,
+                    text=fallback_text,
+                    reply_markup=reply_markup_inline
+                )
+        except Exception as fallback_e:
+            logger.error(f"Не удалось отправить даже fallback-сообщение: {fallback_e}", exc_info=True)
+            chat_id_to_notify = update_or_query.effective_chat.id
+            if chat_id_to_notify:
+                await context.bot.send_message(chat_id=chat_id_to_notify, text="Произошла критическая ошибка при отображении меню доработки.")
 
 
 async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -319,11 +348,9 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
         elif action_choice == "adjust_more_formal":
             instruction_verb_for_status_update = "увеличение формальности стиля"
             final_message_prefix = "Пожалуйста! Теперь текст более формальный:"
-            # --- ИЗМЕНЕНИЕ: Точечная правка для Учебного стиля ---
             if chosen_style_callback == "style_academic":
                 modification_instruction_for_gemini = "Сделай следующий текст немного более формальным, но избегай излишней строгости. Можно заменить некоторые нейтральные слова на более академические аналоги или улучшить связность предложений. Цель — отполированный учебный текст, а не сухой официальный документ."
             else:
-                # Общая инструкция для всех остальных стилей
                 modification_instruction_for_gemini = "Сделай следующий текст еще более формальным, заменяя разговорные или нейтральные слова на их более официальные эквиваленты, но не меняя структуру предложений."
 
         await query.edit_message_text(text=f"Применяю '{instruction_verb_for_status_update}'... Минуточку.")
@@ -335,7 +362,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
             f"КРИТИЧЕСКИ ВАЖНО: Первоначальный и полный смысл текста должен быть сохранен АБСОЛЮТНО ТОЧНО, без малейших искажений или потерь ключевой информации. "
             f"Вот текст для модификации: \"{last_response}\"\n\n"
             f"Твой ответ должен содержать ИСКЛЮЧИТЕЛЬНО и ТОЛЬКО измененный текст. "
-            f"НЕ ДОБАВЛЯЙ никаких приветствий, вступлений, объяснений своих действий, извинений, комментариев, послесловий или каких-либо других фраз, кроме самого измененного текста."
+            f"НЕ ДОБАВЛЯЙ никаких приветствий, вступлений, объяснений своих действий, извинений, комментариев, послесловий или каких-либо других фраз, кроме самого переформулированного текста."
         )
     elif action_choice == "regenerate_text":
         if not original_text:
