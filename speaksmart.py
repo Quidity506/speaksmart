@@ -344,7 +344,7 @@ def main() -> None:
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^Новый текст$"), start_new_text_entry)],
         states={
-            GET_TEXT_FOR_CORRECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_correction)],
+            GET_TEXT_FOR_CORRECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^Новый текст$"), received_text_for_correction)],
             CHOOSE_STYLE: [CallbackQueryHandler(style_chosen, pattern='^style_(business|academic|personal|simplified|auto)$')],
             DESCRIBE_ADDRESSEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, addressee_described)],
             POST_PROCESSING_MENU: [ 
