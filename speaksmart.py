@@ -48,7 +48,8 @@ main_menu_keyboard = ReplyKeyboardMarkup(main_menu_layout, resize_keyboard=True,
 TUNE_INSTRUCTION = """Твоя главная задача — действовать как деликатный корректор, а не как рерайтер.
 1.  **ОБЯЗАТЕЛЬНО СОХРАНЯЙ ПРИВЕТСТВИЯ:** Никогда не удаляй и не изменяй слова приветствия, такие как "привет", "здравствуйте", "добрый день" и т.п., если они есть в начале текста.
 2.  **МИНИМАЛЬНЫЕ ИЗМЕНЕНИЯ:** Не переписывай предложения полностью. Твоя цель — лишь слегка "причесать" текст. Вноси только самые необходимые, точечные изменения: можешь заменить разговорное слово на более формальное или поменять порядок слов для улучшения структуры.
-3.  **СОХРАНЯЙ СУТЬ И ЛЕКСИКУ:** Сохраняй максимум оригинальных слов и конструкций автора. Идея и суть текста должны остаться абсолютно неизменными."""
+3.  **СОХРАНЯЙ СУТЬ И ЛЕКСИКУ:** Сохраняй максимум оригинальных слов и конструкций автора. Идея и суть текста должны остаться абсолютно неизменными.
+4.  **СОХРАНЯЙ ФОРМАТИРОВАНИЕ:** Сохраняй исходное деление на абзацы и переносы строк. Не объединяй несколько абзацев в один."""
 
 
 # --- Функции бота ---
@@ -111,9 +112,9 @@ async def received_text_for_correction(update: Update, context: ContextTypes.DEF
 async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, response_text: str, message_prefix: str):
     context.user_data['last_gemini_response'] = response_text
 
-    processed_response_text = response_text.strip().replace('\n', ' ')
+    processed_response_text = response_text.strip()
     escaped_response_text = escape_markdown(processed_response_text, version=2)
-    formatted_response_text = f"`{escaped_response_text}`"
+    formatted_response_text = escaped_response_text
     escaped_message_prefix = escape_markdown(message_prefix, version=2)
 
     post_process_keyboard_inline = [
@@ -180,7 +181,6 @@ async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     await query.edit_message_text(text=f"Ты выбрал стиль: {style_choice}. Минуточку, обрабатываю твой текст...")
 
-    # --- ИЗМЕНЕНИЕ: Переписаны все инструкции для стилей ---
     style_prompt_instruction = ""
     if style_choice == "style_business":
         style_prompt_instruction = """Применяй следующие принципы делового стиля:
@@ -236,7 +236,6 @@ async def addressee_described(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Понял тебя! Подбираю стиль и переформулирую текст для твоего адресата. Минуточку...")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-    # --- ИЗМЕНЕНИЕ: Переписаны все инструкции для стилей ---
     style_business_instr = """Применяй следующие принципы делового стиля:
 1.  **Обеспечь лаконичность:** Если в предложении есть очевидно лишние слова или повторы, которые можно убрать без потери смысла и изменения структуры — сделай это.
 2.  **Придай официальный тон:** Заменяй разговорную лексику и жаргон на нейтральные или деловые эквиваленты.
@@ -312,55 +311,27 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
         if action_choice == "adjust_softer":
             instruction_verb_for_status_update = "смягчение тона"
             final_message_prefix = "Готово! Сделал текст немного мягче:"
-            if chosen_style_callback == "style_business":
-                modification_instruction_for_gemini = "Сделай следующий текст немного мягче, придав ему больше вежливости и дипломатичности, возможно, выразив поддержку, но сохраняя общий деловой контекст."
-            elif chosen_style_callback == "style_academic":
-                modification_instruction_for_gemini = "Сделай следующий текст немного мягче, добавив элементы дружелюбия или мотивации, возможно, предложив пояснения, но сохраняя академическую основу."
-            elif chosen_style_callback == "style_personal":
-                modification_instruction_for_gemini = "Сделай следующий текст более теплым, доверительным и эмоционально близким."
-            elif chosen_style_callback == "style_simplified":
-                modification_instruction_for_gemini = "Сделай следующий текст мягче, придав ему простой, приятный и более 'живой' разговорный оттенок, но сохраняя ясность."
-            elif chosen_style_callback == "style_auto":
-                modification_instruction_for_gemini = f"Сделай следующий текст немного мягче по тону, учитывая, что он был автоматически подобран для адресата: '{addressee_description_if_auto if addressee_description_if_auto else 'не указан'}'. Постарайся сохранить общую адекватность стиля для этого адресата."
-            else:
-                modification_instruction_for_gemini = "Сделай следующий текст немного мягче по тону."
-
+            modification_instruction_for_gemini = "Сделай следующий текст немного мягче по тону, заменяя отдельные слова на более вежливые или дипломатичные синонимы, но не меняя структуру предложений."
         elif action_choice == "adjust_harder":
             instruction_verb_for_status_update = "увеличение жесткости/настойчивости тона"
             final_message_prefix = "Есть! Текст стал более настойчивым:"
-            if chosen_style_callback == "style_business":
-                modification_instruction_for_gemini = "Сделай следующий текст более жестким и настойчивым, возможно, добавив строгие указания или упомянув жесткие сроки, сохраняя деловой контекст."
-            elif chosen_style_callback == "style_academic":
-                modification_instruction_for_gemini = "Сделай следующий текст более жестким, акцентируя внимание на фактах и уменьшая количество размышлений, но сохраняя академическую основу."
-            elif chosen_style_callback == "style_personal":
-                modification_instruction_for_gemini = "Сделай следующий текст более решительным и прямым."
-            elif chosen_style_callback == "style_simplified":
-                modification_instruction_for_gemini = "Сделай следующий текст более жестким, обеспечив краткость и ясность без излишних смягчений."
-            elif chosen_style_callback == "style_auto":
-                modification_instruction_for_gemini = f"Сделай следующий текст немного жестче или более настойчивым по тону, учитывая, что он был автоматически подобран для адресата: '{addressee_description_if_auto if addressee_description_if_auto else 'не указан'}'. Постарайся сохранить общую адекватность стиля для этого адресата."
-            else:
-                modification_instruction_for_gemini = "Сделай следующий текст немного жестче или более настойчивым по тону."
-
+            modification_instruction_for_gemini = "Сделай следующий текст немного жестче или более настойчивым по тону, заменяя отдельные слова на более сильные или прямые синонимы, но не меняя структуру предложений."
         elif action_choice == "adjust_more_formal":
             instruction_verb_for_status_update = "увеличение формальности стиля"
             final_message_prefix = "Пожалуйста! Теперь текст более формальный:"
-            if chosen_style_callback == "style_business":
-                modification_instruction_for_gemini = "Сделай следующий текст еще более формальным, усилив профессионализм и использование специфической терминологии, характерной для делового стиля."
-            elif chosen_style_callback == "style_academic":
-                modification_instruction_for_gemini = "Сделай следующий текст еще более формальным, усилив его академичность, точность формулировок и структуру, характерную для научного или учебного стиля."
-            elif chosen_style_callback == "style_personal":
-                modification_instruction_for_gemini = "Сделай следующий текст немного более формальным, придав ему более сдержанный и вежливый тон, но стараясь сохранить личный характер общения."
-            elif chosen_style_callback == "style_simplified":
-                modification_instruction_for_gemini = "Сделай следующий текст более формальным, убирая излишне разговорные элементы и приближая речь к более правильной и нейтральной, но сохраняя его простоту и доступность."
-            elif chosen_style_callback == "style_auto":
-                 modification_instruction_for_gemini = f"Сделай следующий текст более формальным, учитывая, что он был автоматически подобран для адресата: '{addressee_description_if_auto if addressee_description_if_auto else 'не указан'}'. Постарайся сохранить общую адекватность стиля для этого адресата."
+            # --- ИЗМЕНЕНИЕ: Точечная правка для Учебного стиля ---
+            if chosen_style_callback == "style_academic":
+                modification_instruction_for_gemini = "Сделай следующий текст немного более формальным, но избегай излишней строгости. Можно заменить некоторые нейтральные слова на более академические аналоги или улучшить связность предложений. Цель — отполированный учебный текст, а не сухой официальный документ."
             else:
-                modification_instruction_for_gemini = "Сделай следующий текст еще более формальным."
+                # Общая инструкция для всех остальных стилей
+                modification_instruction_for_gemini = "Сделай следующий текст еще более формальным, заменяя разговорные или нейтральные слова на их более официальные эквиваленты, но не меняя структуру предложений."
 
         await query.edit_message_text(text=f"Применяю '{instruction_verb_for_status_update}'... Минуточку.")
 
         prompt_for_gemini = (
-            f"{modification_instruction_for_gemini} "
+            f"Твоя задача — изменить тон предоставленного текста согласно инструкции, при этом строго следуя общим правилам. "
+            f"{TUNE_INSTRUCTION}\n"
+            f"Инструкция по изменению тона: {modification_instruction_for_gemini}\n"
             f"КРИТИЧЕСКИ ВАЖНО: Первоначальный и полный смысл текста должен быть сохранен АБСОЛЮТНО ТОЧНО, без малейших искажений или потерь ключевой информации. "
             f"Вот текст для модификации: \"{last_response}\"\n\n"
             f"Твой ответ должен содержать ИСКЛЮЧИТЕЛЬНО и ТОЛЬКО измененный текст. "
@@ -374,7 +345,6 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(text="Генерирую новый вариант на основе первоначальных данных... Минуточку.")
 
         if chosen_style_callback == "style_auto" and addressee_description_if_auto:
-            # --- ИЗМЕНЕНИЕ: Переписаны все инструкции для стилей ---
             style_business_instr = """Применяй следующие принципы делового стиля:
 1.  **Обеспечь лаконичность:** Если в предложении есть очевидно лишние слова или повторы, которые можно убрать без потери смысла и изменения структуры — сделай это.
 2.  **Придай официальный тон:** Заменяй разговорную лексику и жаргон на нейтральные или деловые эквиваленты.
