@@ -46,16 +46,10 @@ main_menu_keyboard = ReplyKeyboardMarkup(main_menu_layout, resize_keyboard=True,
 
 # --- Функции бота ---
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Отправляет приветственное сообщение и показывает основную клавиатуру."""
     user_name = update.effective_user.first_name
     
-    if 'total_runs' not in context.bot_data:
-        context.bot_data['total_runs'] = 0
-    context.bot_data['total_runs'] +=1
-    logger.info(f"Команда /start вызвана. Всего запусков: {context.bot_data['total_runs']}")
-
-
     if context.user_data:
         welcome_text = (
             f"С возвращением, {user_name}!\n\n"
@@ -75,10 +69,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     return ConversationHandler.END
 
 
-# --- ИЗМЕНЕНИЕ 1: НОВАЯ ФУНКЦИЯ ДЛЯ СТАРТА ДИАЛОГА ---
 async def start_new_dialogue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Начинает новый диалог, очищая старые данные."""
-    # Очищаем данные от предыдущего диалога, если они были
     context.user_data.clear()
     logger.info(f"Пользователь {update.effective_user.id} начал новый диалог. user_data очищены.")
     
@@ -137,12 +129,8 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
     
     try:
         target_message_for_edit = None
-        chat_id_for_send = None
-
         if isinstance(update_or_query, CallbackQuery):
             target_message_for_edit = update_or_query.message
-        elif isinstance(update_or_query, Update) and update_or_query.message:
-            chat_id_for_send = update_or_query.effective_chat.id
         
         if target_message_for_edit:
             await context.bot.edit_message_text(
@@ -152,18 +140,16 @@ async def _send_post_processing_menu(update_or_query, context: ContextTypes.DEFA
                 reply_markup=reply_markup_inline,
                 parse_mode=ParseMode.MARKDOWN_V2
             )
-        elif chat_id_for_send:
+        else:
             await context.bot.send_message(
-                chat_id=chat_id_for_send,
+                chat_id=update_or_query.effective_chat.id,
                 text=message_to_send,
                 reply_markup=reply_markup_inline,
                 parse_mode=ParseMode.MARKDOWN_V2
             )
     except Exception as e:
         logger.error(f"Ошибка при отправке/редактировании сообщения в _send_post_processing_menu: {e}", exc_info=True)
-        chat_id_to_notify = None
-        if isinstance(update_or_query, CallbackQuery): chat_id_to_notify = update_or_query.from_user.id
-        elif isinstance(update_or_query, Update) and update_or_query.effective_chat: chat_id_to_notify = update_or_query.effective_chat.id
+        chat_id_to_notify = update_or_query.effective_chat.id
         if chat_id_to_notify:
             await context.bot.send_message(chat_id=chat_id_to_notify, text="Произошла ошибка при отображении меню доработки.")
 
@@ -192,7 +178,6 @@ async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await query.edit_message_text(text=f"Ты выбрал стиль: {style_choice}. Минуточку, обрабатываю твой текст...")
     
     style_prompt_instruction = ""
-    # ... (весь код с промптами для разных стилей остается без изменений) ...
     if style_choice == "style_business": 
         style_prompt_instruction = """При переформулировании придерживайся следующих принципов делового стиля:
 1.  **Обеспечь четкость и структуру:** Устрани из текста всё лишнее. Сделай высказывание максимально логичным, последовательным и целенаправленным.
@@ -224,14 +209,15 @@ async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     )
 
     try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await context.bot.send_chat_action(chat_id=query.message.chat_id, action="typing")
         response_text = gemini_api.ask_gemini(prompt_for_gemini, GEMINI_API_KEY)
         await _send_post_processing_menu(query, context, response_text, "Вот переформулированный текст:")
         return POST_PROCESSING_MENU
     except Exception as e:
-        logger.error(f"Ошибка при вызове gemini_api.ask_gemini для стиля {style_choice}: {e}", exc_info=True)
-        # ... (код обработки ошибок)
+        logger.error(f"Ошибка в style_chosen при вызове Gemini API: {e}", exc_info=True)
+        await query.edit_message_text("К сожалению, произошла ошибка при обработке вашего запроса. Попробуйте позже.")
         return ConversationHandler.END
+
 
 async def addressee_described(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     addressee_description = update.message.text
@@ -246,47 +232,54 @@ async def addressee_described(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Понял тебя! Подбираю стиль и переформулирую текст для твоего адресата. Минуточку...")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    # ... (весь код с промптом для автоопределения стиля остается без изменений) ...
+    style_business_instr = """При переформулировании придерживайся следующих принципов делового стиля:
+1.  **Обеспечь четкость и структуру:** Устрани из текста всё лишнее. Сделай высказывание максимально логичным, последовательным и целенаправленным.
+2.  **Придай официальный тон:** Используй деловую лексику. Полностью избегай эмоциональности. При необходимости добавь нейтральные вводные конструкции и стандартные деловые формулировки.
+3.  **Сфокусируйся на цели сообщения:** Подчеркни ключевую мысль, просьбу или предложение. Адаптируй текст так, чтобы он был уместен для контекста общения с коллегами, руководством или деловыми партнерами."""
+    style_academic_instr = """При переформулировании придерживайся следующих принципов учебного (академического) стиля:
+1.  **Обеспечь логичность и точность:** Улучши последовательность аргументов в тексте. Добавь четкие смысловые связки между частями текста для лучшей структуры.
+2.  **Соблюдай нейтральную академичность:** Используй соответствующую научную или учебную терминологию. Убери разговорные элементы и просторечия. Избегай эмоциональной окраски высказываний.
+3.  **Выдели ключевые понятия:** Усиливай внимание на терминах, теориях, концепциях или аргументах, которые являются важными для учебной или научной задачи, изложенной в тексте."""
+    style_personal_instr = """При переформулировании придерживайся следующих принципов стиля для личного общения:
+1.  **Улучши логику и структуру, сохраняя личный характер:** Сделай текст более связным. При необходимости добавь уместные эмоциональные переходы и расставь смысловые акценты, не теряя при этом индивидуальный стиль автора.
+2.  **Усиль эмоциональность и живость:** Помоги тексту звучать искренне и «по-человечески». Если это уместно, можно усилить выражение чувств, добавить или скорректировать обращения и использование местоимений, чтобы лучше передать личный тон.
+3.  **Сохраняй стиль автора:** Не заменяй характерные для автора индивидуальные выражения. По возможности сохраняй сленг и личные обороты речи, если они присутствуют, фокусируясь на усилении общей подачи и выразительности текста, а не на полной переделке стиля."""
+    style_simplified_instr = """При переформулировании придерживайся следующих принципов упрощения текста:
+1.  **Обеспечь простую структуру:** Старайся делать предложения короче. Если изначальный текст звучал запутанно, его порядок изложения мыслей может быть перестроен для большей логичности и ясности.
+2.  **Используй понятную лексику:** Заменяй сложные термины и узкоспециализированные слова на более простые и общеупотребительные аналоги, при этом полностью сохраняя исходный смысл. Ключевые факты и информация должны быть сохранены.
+3.  **Сделай подачу доступной:** Убирай из текста перегруженные грамматические конструкции (например, сложные причастные и деепричастные обороты, чрезмерное количество вводных слов). Текст должен читаться легко, но все важные детали и факты исходного сообщения должны остаться."""
+
     prompt_for_gemini = f"""Твоя задача – переформулировать исходный текст, автоматически подобрав для него наиболее подходящий стиль, учитывая, что сообщение адресовано: '{addressee_description}'.
-    Проанализируй исходный текст и описание адресата. Определи, какой из следующих четырех стилей (Деловой, Учебный, Личное общение, Упрощение текста) является наиболее подходящим для данной ситуации.
-    После того как ты определишь наиболее подходящий стиль, переформулируй исходный текст, СТРОГО следуя ИСКЛЮЧИТЕЛЬНО инструкциям для ВЫБРАННОГО ТОБОЙ стиля.
-    Вот детальные инструкции для каждого стиля:
-    ---
-    ИНСТРУКЦИИ ДЛЯ ДЕЛОВОГО СТИЛЯ:
-    1.  **Обеспечь четкость и структуру:** Устрани из текста всё лишнее. Сделай высказывание максимально логичным, последовательным и целенаправленным.
-    2.  **Придай официальный тон:** Используй деловую лексику. Полностью избегай эмоциональности. При необходимости добавь нейтральные вводные конструкции и стандартные деловые формулировки.
-    3.  **Сфокусируйся на цели сообщения:** Подчеркни ключевую мысль, просьбу или предложение. Адаптируй текст так, чтобы он был уместен для контекста общения с коллегами, руководством или деловыми партнерами.
-    ---
-    ИНСТРУКЦИИ ДЛЯ УЧЕБНОГО (АКАДЕМИЧЕСКОГО) СТИЛЯ:
-    1.  **Обеспечь логичность и точность:** Улучши последовательность аргументов в тексте. Добавь четкие смысловые связки между частями текста для лучшей структуры.
-    2.  **Соблюдай нейтральную академичность:** Используй соответствующую научную или учебную терминологию. Убери разговорные элементы и просторечия. Избегай эмоциональной окраски высказываний.
-    3.  **Выдели ключевые понятия:** Усиливай внимание на терминах, теориях, концепциях или аргументах, которые являются важными для учебной или научной задачи, изложенной в тексте.
-    ---
-    ИНСТРУКЦИИ ДЛЯ СТИЛЯ ЛИЧНОГО ОБЩЕНИЯ:
-    1.  **Улучши логику и структуру, сохраняя личный характер:** Сделай текст более связным. При необходимости добавь уместные эмоциональные переходы и расставь смысловые акценты, не теряя при этом индивидуальный стиль автора.
-    2.  **Усиль эмоциональность и живость:** Помоги тексту звучать искренне и «по-человечески». Если это уместно, можно усилить выражение чувств, добавить или скорректировать обращения и использование местоимений, чтобы лучше передать личный тон.
-    3.  **Сохраняй стиль автора:** Не заменяй характерные для автора индивидуальные выражения. По возможности сохраняй сленг и личные обороты речи, если они присутствуют, фокусируясь на усилении общей подачи и выразительности текста, а не на полной переделке стиля.
-    ---
-    ИНСТРУКЦИИ ДЛЯ УПРОЩЕНИЯ ТЕКСТА:
-    1.  **Обеспечь простую структуру:** Старайся делать предложения короче. Если изначальный текст звучал запутанно, его порядок изложения мыслей может быть перестроен для большей логичности и ясности.
-    2.  **Используй понятную лексику:** Заменяй сложные термины и узкоспециализированные слова на более простые и общеупотребительные аналоги, при этом полностью сохраняя исходный смысл. Ключевые факты и информация должны быть сохранены.
-    3.  **Сделай подачу доступной:** Убирай из текста перегруженные грамматические конструкции (например, сложные причастные и деепричастные обороты, чрезмерное количество вводных слов). Текст должен читаться легко, но все важные детали и факты исходного сообщения должны остаться.
-    ---
+Проанализируй исходный текст и описание адресата. Определи, какой из следующих четырех стилей (Деловой, Учебный, Личное общение, Упрощение текста) является наиболее подходящим для данной ситуации.
+После того как ты определишь наиболее подходящий стиль, переформулируй исходный текст, СТРОГО следуя ИСКЛЮЧИТЕЛЬНО инструкциям для ВЫБРАННОГО ТОБОЙ стиля.
+Вот детальные инструкции для каждого стиля:
+---
+ИНСТРУКЦИИ ДЛЯ ДЕЛОВОГО СТИЛЯ:
+{style_business_instr}
+---
+ИНСТРУКЦИИ ДЛЯ УЧЕБНОГО (АКАДЕМИЧЕСКОГО) СТИЛЯ:
+{style_academic_instr}
+---
+ИНСТРУКЦИИ ДЛЯ СТИЛЯ ЛИЧНОГО ОБЩЕНИЯ:
+{style_personal_instr}
+---
+ИНСТРУКЦИИ ДЛЯ УПРОЩЕНИЯ ТЕКСТА:
+{style_simplified_instr}
+---
+Если ты не можешь с высокой уверенностью определить один из этих четырех стилей на основе описания адресата ('{addressee_description}') и исходного текста, сделай переформулированный текст максимально нейтральным и обезличенным, без явных обращений и излишних эмоций, но при этом понятным, логичным и сохраняющим всю суть исходного сообщения.
+КРИТИЧЕСКИ ВАЖНО: Первоначальный и полный смысл исходного текста должен быть сохранен АБСОЛЮТНО ТОЧНО, без малейших искажений, потерь ключевой информации или добавления нового смысла.
+Исходный текст для переформулирования: "{text_to_correct}"
 
-    Если ты не можешь с высокой уверенностью определить один из этих четырех стилей на основе описания адресата ('{addressee_description}') и исходного текста, сделай переформулированный текст максимально нейтральным и обезличенным, без явных обращений и излишних эмоций, но при этом понятным, логичным и сохраняющим всю суть исходного сообщения.
-    КРИТИЧЕСКИ ВАЖНО: Первоначальный и полный смысл исходного текста должен быть сохранен АБСОЛЮТНО ТОЧНО, без малейших искажений, потерь ключевой информации или добавления нового смысла.
-    Исходный текст для переформулирования: "{text_to_correct}"
-
-    Твой ответ должен содержать ИСКЛЮЧИТЕЛЬНО и ТОЛЬКО переформулированный текст.
-    НЕ ДОБАВЛЯЙ никаких приветствий, вступлений, объяснений своих действий, извинений, комментариев, послесловий или каких-либо других фраз, кроме самого переформулированного текста."""
+Твой ответ должен содержать ИСКЛЮЧИТЕЛЬНО и ТОЛЬКО переформулированный текст.
+НЕ ДОБАВЛЯЙ никаких приветствий, вступлений, объяснений своих действий, извинений, комментариев, послесловий или каких-либо других фраз, кроме самого переформулированного текста."""
         
     try:
         response_text = gemini_api.ask_gemini(prompt_for_gemini, GEMINI_API_KEY)
         await _send_post_processing_menu(update, context, response_text, f"Вот переформулированный текст (стиль подобран автоматически для '{addressee_description}'):")
         return POST_PROCESSING_MENU
     except Exception as e:
-        logger.error(f"Ошибка при вызове gemini_api.ask_gemini для автоопределения: {e}", exc_info=True)
-        # ... (код обработки ошибок)
+        logger.error(f"Ошибка в addressee_described при вызове Gemini API: {e}", exc_info=True)
+        await update.message.reply_text("К сожалению, произошла ошибка при обработке вашего запроса с автоопределением стиля. Попробуйте позже.")
         return ConversationHandler.END
 
 
@@ -303,7 +296,6 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
     prompt_for_gemini = ""
     final_message_prefix = ""
     
-    # ... (вся логика для 'adjust_softer', 'adjust_harder', 'adjust_more_formal' и 'regenerate_text' остается без изменений) ...
     if action_choice in ["adjust_softer", "adjust_harder", "adjust_more_formal"]:
         if not last_response:
             await query.edit_message_text(text="Ошибка: текст для доработки не найден. Начните заново, нажав «новый текст».")
@@ -376,9 +368,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
 
         await query.edit_message_text(text="Генерирую новый вариант на основе первоначальных данных... Минуточку.")
         
-        # ... (логика для regenerate_text остается без изменений)
         if chosen_style_callback == "style_auto" and addressee_description_if_auto:
-            # ... (промпт для авто-стиля)
             style_business_instr = """При переформулировании придерживайся следующих принципов делового стиля:
 1.  **Обеспечь четкость и структуру:** Устрани из текста всё лишнее. Сделай высказывание максимально логичным, последовательным и целенаправленным.
 2.  **Придай официальный тон:** Используй деловую лексику. Полностью избегай эмоциональности. При необходимости добавь нейтральные вводные конструкции и стандартные деловые формулировки.
@@ -397,13 +387,9 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
 3.  **Сделай подачу доступной:** Убирай из текста перегруженные грамматические конструкции (например, сложные причастные и деепричастные обороты, чрезмерное количество вводных слов). Текст должен читаться легко, но все важные детали и факты исходного сообщения должны остаться."""
 
             prompt_for_gemini = f"""Твоя задача – переформулировать исходный текст, автоматически подобрав для него наиболее подходящий стиль, учитывая, что сообщение адресовано: '{addressee_description_if_auto}'.
-
 Проанализируй исходный текст и описание адресата. Определи, какой из следующих четырех стилей (Деловой, Учебный, Личное общение, Упрощение текста) является наиболее подходящим для данной ситуации.
-
 После того как ты определишь наиболее подходящий стиль, переформулируй исходный текст, СТРОГО следуя ИСКЛЮЧИТЕЛЬНО инструкциям для ВЫБРАННОГО ТОБОЙ стиля.
-
 Вот детальные инструкции для каждого стиля:
-
 ---
 ИНСТРУКЦИИ ДЛЯ ДЕЛОВОГО СТИЛЯ:
 {style_business_instr}
@@ -417,19 +403,15 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
 ИНСТРУКЦИИ ДЛЯ УПРОЩЕНИЯ ТЕКСТА:
 {style_simplified_instr}
 ---
-
 Если ты не можешь с высокой уверенностью определить один из этих четырех стилей на основе описания адресата ('{addressee_description_if_auto}') и исходного текста, сделай переформулированный текст максимально нейтральным и обезличенным, без явных обращений и излишних эмоций, но при этом понятным, логичным и сохраняющим всю суть исходного сообщения.
-
 КРИТИЧЕСКИ ВАЖНО: Первоначальный и полный смысл исходного текста должен быть сохранен АБСОЛЮТНО ТОЧНО, без малейших искажений, потерь ключевой информации или добавления нового смысла.
 Исходный текст для переформулирования: "{original_text}"
 
 Твой ответ должен содержать ИСКЛЮЧИТЕЛЬНО и ТОЛЬКО переформулированный текст.
-НЕ ДОБАВЛЯЙ никаких приветствий, вступлений, объяснений своих действий, извинений, комментариев, послесловий или каких-либо других фраз, кроме самого переформулированного текста.
-"""
+НЕ ДОБАВЛЯЙ никаких приветствий, вступлений, объяснений своих действий, извинений, комментариев, послесловий или каких-либо других фраз, кроме самого переформулированного текста."""
             final_message_prefix = f"Новый вариант (стиль подобран автоматически для '{addressee_description_if_auto}'):"
 
         elif chosen_style_callback and chosen_style_callback != "style_auto":
-            # ... (промпт для конкретного стиля)
             style_specific_instruction = ""
             if chosen_style_callback == "style_business":
                 style_specific_instruction = """При переформулировании придерживайся следующих принципов делового стиля:
@@ -477,15 +459,17 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(text=f"Неизвестное действие: {action_choice}. Завершаю диалог.")
         return ConversationHandler.END
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    await context.bot.send_chat_action(chat_id=query.message.chat_id, action="typing")
 
     try:
         new_response_text = gemini_api.ask_gemini(prompt_for_gemini, GEMINI_API_KEY)
         await _send_post_processing_menu(query, context, new_response_text, final_message_prefix)
         return POST_PROCESSING_MENU
     except Exception as e:
-        logger.error(f"Ошибка при вызове gemini_api.ask_gemini в post_processing_action ({action_choice}): {e}", exc_info=True)
-        # ... (код обработки ошибок)
+        logger.error(f"Ошибка в post_processing_action при вызове Gemini API: {e}", exc_info=True)
+        await query.edit_message_text(
+            text="К сожалению, произошла ошибка при доработке/генерации текста. Попробуйте позже."
+        )
         return ConversationHandler.END
 
 
@@ -518,35 +502,37 @@ def main() -> None:
     
     application = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
     
-    # --- ИЗМЕНЕНИЕ 2: ОБНОВЛЕННЫЙ CONVERSATIONHANDLER ---
+    # --- ИСПРАВЛЕННАЯ ЛОГИКА ---
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Text(["новый текст"]), start_new_dialogue)],
         states={
-            GET_TEXT_FOR_CORRECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_correction)],
-            CHOOSE_STYLE: [CallbackQueryHandler(style_chosen, pattern='^style_(business|academic|personal|simplified|auto)$')],
-            DESCRIBE_ADDRESSEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, addressee_described)],
-            POST_PROCESSING_MENU: [ 
+            GET_TEXT_FOR_CORRECTION: [
+                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_correction)
+            ],
+            CHOOSE_STYLE: [
+                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
+                CallbackQueryHandler(style_chosen, pattern='^style_(business|academic|personal|simplified|auto)$')
+            ],
+            DESCRIBE_ADDRESSEE: [
+                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, addressee_described)
+            ],
+            POST_PROCESSING_MENU: [
+                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
                 CallbackQueryHandler(post_processing_action, pattern='^(adjust_(softer|harder|more_formal)|regenerate_text)$')
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel_conversation)],
-        # Позволяет ConversationHandler обрабатывать обновления, даже если они также совпадают с другими обработчиками верхнего уровня
-        per_message=False 
     )
     
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
-    # Отдельный обработчик для /cancel на случай, если пользователь хочет отменить действие вне диалога
-    application.add_handler(CommandHandler('cancel', cancel_conversation))
     
     logger.info("Бот Telegram успешно настроен и запускается в режиме опроса...")
-    try:
-        application.run_polling()
-    except Exception as e:
-        logger.critical(f"Критическая ошибка при работе Telegram-бота: {e}", exc_info=True)
-    finally:
-        logger.info("Бот Telegram остановлен.")
+    application.run_polling()
+
 
 if __name__ == "__main__":
     main()
