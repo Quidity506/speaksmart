@@ -40,7 +40,7 @@ GET_TEXT_FOR_CORRECTION, CHOOSE_STYLE, DESCRIBE_ADDRESSEE, POST_PROCESSING_MENU 
 
 # --- ОСНОВНАЯ КЛАВИАТУРА МЕНЮ ---
 main_menu_layout = [
-    [KeyboardButton("Товый текст")]
+    [KeyboardButton("Новый текст")]
 ]
 main_menu_keyboard = ReplyKeyboardMarkup(main_menu_layout, resize_keyboard=True, one_time_keyboard=False)
 
