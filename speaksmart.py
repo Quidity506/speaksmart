@@ -40,7 +40,7 @@ GET_TEXT_FOR_CORRECTION, CHOOSE_STYLE, DESCRIBE_ADDRESSEE, POST_PROCESSING_MENU 
 
 # --- ОСНОВНАЯ КЛАВИАТУРА МЕНЮ ---
 main_menu_layout = [
-    [KeyboardButton("новый текст")]
+    [KeyboardButton("Товый текст")]
 ]
 main_menu_keyboard = ReplyKeyboardMarkup(main_menu_layout, resize_keyboard=True, one_time_keyboard=False)
 
@@ -60,12 +60,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if context.user_data:
         welcome_text = (
             f"С возвращением, {user_name}!\n\n"
-            "Чтобы начать работу, нажми кнопку «новый текст» в меню ниже."
+            "Чтобы начать работу, нажми кнопку «Новый текст» в меню ниже."
         )
     else:
         welcome_text = (
             f"Привет, {user_name}! Я SpeakSmartBot.\n"
-            "Помогу сделать твой текст лучше. Нажми «новый текст», чтобы начать 👇"
+            "Помогу сделать твой текст лучше. Нажми «Новый текст», чтобы начать 👇"
         )
 
     await update.message.reply_text(
@@ -173,7 +173,7 @@ async def style_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     text_to_correct = context.user_data.get('text_to_correct')
 
     if not text_to_correct:
-        await query.edit_message_text(text="Произошла ошибка: не найден исходный текст. Пожалуйста, начни заново, нажав «новый текст».")
+        await query.edit_message_text(text="Произошла ошибка: не найден исходный текст. Пожалуйста, начни заново, нажав «Новый текст».")
         return ConversationHandler.END
 
     if style_choice == "style_auto":
@@ -235,7 +235,7 @@ async def addressee_described(update: Update, context: ContextTypes.DEFAULT_TYPE
     text_to_correct = context.user_data.get('text_to_correct')
 
     if not text_to_correct:
-        await update.message.reply_text("Произошла ошибка: не найден исходный текст. Пожалуйста, начни заново, нажав «новый текст».")
+        await update.message.reply_text("Произошла ошибка: не найден исходный текст. Пожалуйста, начни заново, нажав «Новый текст».")
         return ConversationHandler.END
 
     await update.message.reply_text("Понял тебя! Подбираю стиль и переформулирую текст для твоего адресата. Минуточку...")
@@ -307,7 +307,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
 
     if action_choice in ["adjust_softer", "adjust_harder", "adjust_more_formal"]:
         if not last_response:
-            await query.edit_message_text(text="Ошибка: текст для доработки не найден. Начните заново, нажав «новый текст».")
+            await query.edit_message_text(text="Ошибка: текст для доработки не найден. Начните заново, нажав «Новый текст».")
             return ConversationHandler.END
 
         instruction_verb_for_status_update = ""
@@ -342,7 +342,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
         )
     elif action_choice == "regenerate_text":
         if not original_text:
-            await query.edit_message_text(text="Ошибка: исходный текст для повторной генерации не найден. Начните заново, нажав «новый текст».")
+            await query.edit_message_text(text="Ошибка: исходный текст для повторной генерации не найден. Начните заново, нажав «Новый текст».")
             return ConversationHandler.END
 
         await query.edit_message_text(text="Генерирую новый вариант на основе первоначальных данных... Минуточку.")
@@ -413,7 +413,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
 2.  **Сокращай, но осторожно:** Только если предложение очень длинное и запутанное, ты можешь аккуратно разделить его на два, стараясь сохранить исходные слова и порядок мысли. Не делай этого без крайней необходимости."""
 
             if not style_specific_instruction:
-                 await query.edit_message_text(text="Ошибка: неизвестный стиль для повторной генерации. Начните заново, нажав «новый текст».")
+                 await query.edit_message_text(text="Ошибка: неизвестный стиль для повторной генерации. Начните заново, нажав «Новый текст».")
                  return ConversationHandler.END
 
             prompt_for_gemini = (
@@ -432,7 +432,7 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
             readable_style_name = style_name_map.get(chosen_style_callback, chosen_style_callback)
             final_message_prefix = f"Новый вариант ({readable_style_name}):"
         else:
-            await query.edit_message_text(text="Ошибка: не удалось восстановить параметры для повторной генерации. Начните заново, нажав «новый текст».")
+            await query.edit_message_text(text="Ошибка: не удалось восстановить параметры для повторной генерации. Начните заново, нажав «Новый текст».")
             return ConversationHandler.END
     else:
         await query.edit_message_text(text=f"Неизвестное действие: {action_choice}. Завершаю диалог.")
@@ -455,9 +455,9 @@ async def post_processing_action(update: Update, context: ContextTypes.DEFAULT_T
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text("Действие отменено. Чтобы начать заново, нажми «новый текст».")
+        await update.callback_query.edit_message_text("Действие отменено. Чтобы начать заново, нажми «Новый текст».")
     elif update.message:
-        await update.message.reply_text("Действие отменено. Чтобы начать заново, нажми «новый текст».",
+        await update.message.reply_text("Действие отменено. Чтобы начать заново, нажми «Новый текст».",
                                       reply_markup=main_menu_keyboard)
     context.user_data.clear()
     logger.info(f"Пользователь {update.effective_user.id} отменил диалог.")
@@ -481,22 +481,22 @@ def main() -> None:
     application = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Text(["новый текст"]), start_new_dialogue)],
+        entry_points=[MessageHandler(filters.Text(["Новый текст"]), start_new_dialogue)],
         states={
             GET_TEXT_FOR_CORRECTION: [
-                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
+                MessageHandler(filters.Text(["Новый текст"]), start_new_dialogue),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, received_text_for_correction)
             ],
             CHOOSE_STYLE: [
-                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
+                MessageHandler(filters.Text(["Новый текст"]), start_new_dialogue),
                 CallbackQueryHandler(style_chosen, pattern='^style_(business|academic|personal|simplified|auto)$')
             ],
             DESCRIBE_ADDRESSEE: [
-                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
+                MessageHandler(filters.Text(["Новый текст"]), start_new_dialogue),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, addressee_described)
             ],
             POST_PROCESSING_MENU: [
-                MessageHandler(filters.Text(["новый текст"]), start_new_dialogue),
+                MessageHandler(filters.Text(["Новый текст"]), start_new_dialogue),
                 CallbackQueryHandler(post_processing_action, pattern='^(adjust_(softer|harder|more_formal)|regenerate_text)$')
             ],
         },
